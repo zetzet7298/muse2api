@@ -61,3 +61,32 @@ async def get_video(task_id: str, request: Request,
         raise NotFound(f"video task '{task_id}' not found")
     request.state.model = task.request.get("model")
     return _task_view(task)
+
+
+# --- NewAPI-style aliases (ArcReel's builtin `newapi-video` endpoint) ------------------------
+# POST /v1/video/generations -> {task_id}; GET /v1/video/generations/{id} -> {status, url}.
+
+
+@router.post("/v1/video/generations")
+async def create_video_newapi(payload: dict, request: Request,
+                              svc: Services = Depends(get_services)) -> dict:
+    size = payload.get("size")
+    if not size and payload.get("width") and payload.get("height"):
+        size = f"{payload['width']}x{payload['height']}"
+    body = VideoCreateRequest(prompt=payload.get("prompt") or "", model=payload.get("model"), size=size,
+                              duration=int(payload["duration"]) if payload.get("duration") else None,
+                              image=payload.get("image") or None)
+    view = await create_video(body, request, svc)
+    return {"task_id": view["id"], "status": view["status"]}
+
+
+@router.get("/v1/video/generations/{task_id}")
+async def get_video_newapi(task_id: str, request: Request,
+                           svc: Services = Depends(get_services)) -> dict:
+    view = await get_video(task_id, request, svc)
+    out: dict = {"task_id": task_id, "status": view["status"]}
+    if view["result"]:
+        out["url"] = view["result"]["url"]
+    if view["error"]:
+        out["error"] = view["error"] if isinstance(view["error"], dict) else {"message": str(view["error"])}
+    return out
