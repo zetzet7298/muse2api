@@ -185,7 +185,16 @@ class HttpDriver(MuseDriver):
                     except Exception:
                         pass
 
-        task = asyncio.ensure_future(asyncio.to_thread(work))
+        def work_retry() -> list[MediaResult]:
+            # An occasional turn ends without media (agent replied with nothing); one retry fixes it.
+            try:
+                return work()
+            except UpstreamError as exc:
+                if "returned no" not in str(exc):
+                    raise
+                return work()
+
+        task = asyncio.ensure_future(asyncio.to_thread(work_retry))
         try:
             while not task.done():
                 if cancel is not None and cancel.is_set():
