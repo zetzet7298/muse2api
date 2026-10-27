@@ -7,7 +7,9 @@ The ``voice`` field is an ElevenLabs voice id. The key comes from
 
 from __future__ import annotations
 
+import io
 import os
+import wave
 from pathlib import Path
 
 import httpx
@@ -20,7 +22,7 @@ from ..deps import require_api_key
 
 router = APIRouter(tags=["audio"], dependencies=[Depends(require_api_key)])
 
-_FORMATS = {"mp3": ("mp3_44100_128", "audio/mpeg"), "wav": ("pcm_44100", "audio/wav"),
+_FORMATS = {"mp3": ("mp3_44100_128", "audio/mpeg"), "wav": ("pcm_24000", "audio/wav"),
             "pcm": ("pcm_24000", "audio/L16"), "opus": ("opus_48000_128", "audio/ogg")}
 _OPENAI_MODELS = {"tts-1", "tts-1-hd", "gpt-4o-mini-tts"}
 _DEFAULT_VOICE = os.environ.get("MUSE2API_ELEVENLABS_VOICE_ID", "YeV2u3R2gzLArVTYTis8")  # Tuan Anh - Story
@@ -57,4 +59,13 @@ async def speech(body: SpeechRequest) -> Response:
                               params={"output_format": fmt}, json=payload, headers={"xi-api-key": _key()})
     if r.status_code != 200:
         raise UpstreamError(f"elevenlabs HTTP {r.status_code}: {r.text[:300]}")
-    return Response(content=r.content, media_type=mime)
+    content = r.content
+    if body.response_format == "wav":  # ElevenLabs returns raw PCM; wrap it (24 kHz mono 16-bit)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(24000)
+            w.writeframes(content)
+        content = buf.getvalue()
+    return Response(content=content, media_type=mime)
